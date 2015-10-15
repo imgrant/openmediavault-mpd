@@ -1,0 +1,68 @@
+#!/bin/sh
+
+set -e
+
+. /etc/default/openmediavault
+. /usr/share/openmediavault/scripts/helper-functions
+
+case "$1" in
+    configure)
+	# Disable MPD by default
+	if [ -z "$2" ]; then
+                        echo "Updating init script links and actions"
+                        invoke-rc.d --force mpd stop
+                        update-rc.d mpd disable &>/dev/null
+        fi
+
+        SERVICE_XPATH_NAME="mpd"
+        SERVICE_XPATH="/config/services/${SERVICE_XPATH_NAME}"
+        OUTPUTS_XPATH_NAME="audiooutputs"
+        OUTPUTS_XPATH="${SERVICE_XPATH}/${OUTPUTS_XPATH_NAME}"
+
+        if ! omv_config_exists "${SERVICE_XPATH}"; then
+            omv_config_add_element "/config/services" "${SERVICE_XPATH_NAME}"
+            omv_config_add_element "${SERVICE_XPATH}" "enable" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "bind_to_address" "any"
+            omv_config_add_element "${SERVICE_XPATH}" "port" "6600"
+            omv_config_add_element "${SERVICE_XPATH}" "log_level" "default"
+            omv_config_add_element "${SERVICE_XPATH}" "enable_music_dir" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "music_directory" ""
+            omv_config_add_element "${SERVICE_XPATH}" "auto_update" "1"
+            omv_config_add_element "${SERVICE_XPATH}" "follow_outside_symlinks" "1"
+            omv_config_add_element "${SERVICE_XPATH}" "follow_inside_symlinks" "1"
+            omv_config_add_element "${SERVICE_XPATH}" "enable_playlist_dir" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "playlist_directory" ""
+            omv_config_add_element "${SERVICE_XPATH}" "save_absolute_paths_in_playlists" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "password_required" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "password" ""
+            omv_config_add_element "${SERVICE_XPATH}" "enable_replaygain" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "replaygain" "auto"
+            omv_config_add_element "${SERVICE_XPATH}" "replaygain_preamp" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "replaygain_missing_preamp" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "replaygain_limit" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "volume_normalization" "0"
+            omv_config_add_element "${SERVICE_XPATH}" "gapless_mp3_playback" "1"
+            omv_config_add_element "${SERVICE_XPATH}" "buffer_before_play" "10"
+            omv_config_add_element "${SERVICE_XPATH}" "restore_paused" "1"
+            omv_config_add_element "${SERVICE_XPATH}" "extra_options" ""
+            omv_config_add_element "${SERVICE_XPATH}" "${OUTPUTS_XPATH_NAME}"
+        fi
+
+        # Activate package triggers. These triggers are only set during the
+        # package installation.
+        dpkg-trigger update-fixperms
+        dpkg-trigger update-locale
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument" >&2
+        exit 1
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,135 @@
+#!/bin/sh
+#
+# Copyright (C) 2014 OpenMediaVault Plugin Developers
+#
+# This file is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# This file is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this file. If not, see <http://www.gnu.org/licenses/>.
+
+set -e
+
+. /etc/default/openmediavault
+. /usr/share/openmediavault/scripts/helper-functions
+
+SERVICE_XPATH="/config/services/mpd"
+AUDIO_OUTPUT_XPATH="${SERVICE_XPATH}/audiooutputs/audiooutput"
+OMV_MPD_CONFIG=${OMV_MPD_CONFIG:-"/etc/mpd.conf"}
+OMV_MPD_DEFAULT=${OMV_MPD_DEFAULT:-"/etc/default/mpd"}
+OMV_MPD_START=${OMV_MPD_START:-"true"}
+OMV_MPD_GENERAL_UID=${OMV_MPD_GENERAL_UID:-"mpd"}
+OMV_MPD_GENERAL_LOGFILE=${OMV_MPD_GENERAL_LOGFILE:-"/var/log/mpd/mpd.log"}
+OMV_MPD_GENERAL_PIDFILE=${OMV_MPD_GENERAL_PIDFILE:-"/run/mpd/pid"}
+OMV_MPD_GENERAL_STATEFILE=${OMV_MPD_GENERAL_STATEFILE:-"/var/lib/mpd/state"}
+OMV_MPD_GENERAL_STICKERFILE=${OMV_MPD_GENERAL_STICKERFILE:-"/var/lib/mpd/sticker.sql"}
+OMV_MPD_GENERAL_DBPATH=${OMV_MPD_GENERAL_DBPATH:-"/var/lib/mpd/tag_cache"}
+OMV_MPD_GENERAL_FSCHARSET=${OMV_MPD_GENERAL_FSCHARSET:-"UTF-8"}
+OMV_MPD_GENERAL_ID3V1_ENCODING=${OMV_MPD_GENERAL_ID3V1_ENCODING:-"UTF-8"}
+OMV_MPD_VERSION=$(mpd -V | head -n 1 | awk '{print $6}')
+
+# Generate configuration files
+mkconf() {
+
+	# Create defaults file (/etc/default/mpd)
+	cat <<EOF > ${OMV_MPD_DEFAULT}
+START_MPD="${OMV_MPD_START}"
+MPDCONF="${OMV_MPD_CONFIG}"
+EOF
+
+  # Check which version of MPD is installed
+  if dpkg --compare-versions $OMV_MPD_VERSION ge 0.17; then
+	  OMV_MPD_RESTORE_PAUSED_SUPPORTED=1
+  else
+	  OMV_MPD_RESTORE_PAUSED_SUPPORTED=0
+  fi
+
+  # Fetch the paths for any shared folders that are configured
+  msfref=$(omv_config_get "${SERVICE_XPATH}/music_directory")
+  msfpath=$(omv_get_sharedfolder_path "${msfref}")
+  psfref=$(omv_config_get "${SERVICE_XPATH}/playlist_directory")
+  psfpath=$(omv_get_sharedfolder_path "${psfref}")
+
+  # Create main configuration file (/etc/mpd.conf)
+  xmlstarlet sel -t \
+    -o "user \"${OMV_MPD_GENERAL_UID}\"" -n \
+    -o "log_file \"${OMV_MPD_GENERAL_LOGFILE}\"" -n \
+    -o "pid_file \"${OMV_MPD_GENERAL_PIDFILE}\"" -n \
+    -o "db_file \"${OMV_MPD_GENERAL_DBPATH}\"" -n \
+    -o "state_file \"${OMV_MPD_GENERAL_STATEFILE}\"" -n \
+    -o "sticker_file \"${OMV_MPD_GENERAL_STICKERFILE}\"" -n \
+    -m "${SERVICE_XPATH}" \
+      -v "concat('log_level \"',log_level,'\"')" -n \
+      -v "concat('bind_to_address \"',bind_to_address,'\"')" -n \
+  	  -v "concat('port \"',port,'\"')" -n \
+      -i "enable_music_dir = 1" \
+        -o "music_directory \"${msfpath}\"" -n \
+        -i "auto_update = 1" -o "auto_update \"yes\"" -n --else -o "auto_update \"no\"" -n -b \
+        -i "follow_outside_symlinks = 1" -o "follow_outside_symlinks \"yes\"" -n --else -o "follow_outside_symlinks \"no\"" -n -b \
+        -i "follow_inside_symlinks = 1" -o "follow_inside_symlinks \"yes\"" -n --else -o "follow_inside_symlinks \"no\"" -n -b \
+      -b \
+      -i "enable_playlist_dir = 1" \
+        -o "playlist_directory \"${psfpath}\"" -n \
+        -i "save_absolute_paths_in_playlists = 1" -o "save_absolute_paths_in_playlists \"yes\"" -n --else -o "save_absolute_paths_in_playlists \"no\"" -n -b \
+      -b \
+      -i "password_required = 1" \
+        -v "concat('password \"',password,'@read,add,control,admin\"')" -n \
+      -b \
+      -i "enable_replaygain = 1" \
+        -v "concat('replaygain \"',replaygain,'\"')" -n \
+        -v "concat('replaygain_preamp \"',replaygain_preamp,'\"')" -n \
+        -v "concat('replaygain_missing_preamp \"',replaygain_missing_preamp,'\"')" -n \
+        -i "replaygain_limit = 1" -o "replaygain_limit \"yes\"" -n --else -o "replaygain_limit \"no\"" -n -b \
+      -b \
+      -i "volume_normalization = 1" -o "volume_normalization \"yes\"" -n --else -o "volume_normalization \"no\"" -n -b \
+      -i "gapless_mp3_playback = 1" -o "gapless_mp3_playback \"yes\"" -n --else -o "gapless_mp3_playback \"no\"" -n -b \
+	  -i "${OMV_MPD_RESTORE_PAUSED_SUPPORTED} = 1" \
+      	-i "restore_paused = 1" -o "restore_paused \"yes\"" -n --else -o "restore_paused \"no\"" -n -b \
+	  -b \
+      -v "concat('buffer_before_play \"',buffer_before_play,'%\"')" -n \
+      -i "string-length(extra_options) > 0" -v "extra_options" -n -b \
+    -b \
+    -o "input {" -n \
+    -o "  plugin \"curl\"" -n \
+    -o "}" -n \
+    -o "filesystem_charset \"${OMV_MPD_GENERAL_FSCHARSET}\"" -n \
+    -o "id3v1_encoding \"${OMV_MPD_GENERAL_ID3V1_ENCODING}\"" -n \
+    ${OMV_CONFIG_FILE} | xmlstarlet unesc > ${OMV_MPD_CONFIG}
+
+    # Add audio outputs
+    index=$(omv_config_get_count "${AUDIO_OUTPUT_XPATH}")
+    while [ ${index} -gt 0 ]; do
+      xmlstarlet sel -t -m "${AUDIO_OUTPUT_XPATH}" \
+              -i "position()=${index}" \
+                -o "audio_output {" -n \
+                -v "concat('  type \"',type,'\"')" -n \
+                -v "concat('  name \"',name,'\"')" -n \
+                -v "concat('  format \"',format,'\"')" -n \
+                -i "enabled = 1" -o "  enabled \"yes\"" -n --else -o "  enabled \"no\"" -n -b \
+                -i "always_on = 1" -o "  always_on \"yes\"" -n --else -o "  always_on \"no\"" -n -b \
+                -v "concat('  mixer_type \"',mixer_type,'\"')" -n \
+                -v "concat('  replay_gain_handler \"',replaygain_handler,'\"')" -n \
+                -i "string-length(extra_options) > 0" -v "extra_options" -n -b \
+                -o "}" -n \
+              -b \
+        -b \
+        ${OMV_CONFIG_FILE} | xmlstarlet unesc >> ${OMV_MPD_CONFIG}
+      index=$(( ${index} - 1 ))
+    done
+
+}
+
+
+case "$1" in
+mkconf|*)
+  mkconf
+  ;;
+esac
+exit 0

@@ -1,0 +1,320 @@
+<?php
+
+/**
+ * Copyright (C) 2014 OpenMediaVault Plugin Developers
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+require_once "openmediavault/config.inc";
+require_once "openmediavault/error.inc";
+require_once "openmediavault/initscript.inc";
+require_once "openmediavault/module.inc";
+require_once "openmediavault/util.inc";
+require_once("openmediavault/monit.inc");
+require_once("openmediavault/log.inc");
+
+class OMVModuleMpd extends OMVModuleServiceAbstract implements
+    OMVIModuleServiceStatus,
+    OMVINotifyListener
+{
+    /**
+     * Get the name of the module.
+     *
+     * @return string
+     */
+    public function getName()
+    {
+        return "mpd";
+    }
+
+    /**
+     * Get the name of the plugin (lowercase).
+     *
+     * @return string
+     */
+    private function getPluginName()
+    {
+        return strtolower($this->getName());
+    }
+
+    /**
+     * Defines the modules that if present should start before the service
+     * provided by this module.
+     * @return An array of modules.
+     */
+    public function shouldStart() { return array("monit"); }
+
+    /**
+     * Defines the modules that if present should be stopped after the
+     * service provided by this module.
+     * @return An array of modules.
+     */
+    function shouldStop() { return array("monit"); }
+
+    /**
+     * Get the service configuration XPath.
+     *
+     * @return string
+     */
+    private function getXPath()
+    {
+        return sprintf("//services/%s", $this->getPluginName());
+    }
+
+    /**
+     * Get the audio outputs configuration XPath.
+     *
+     * @return string
+     */
+    private function getAudioOutputsXpath()
+    {
+        return sprintf("%s/audiooutputs", $this->getXPath());
+    }
+
+    /**
+     * Get an individual audio output configuration XPath.
+     *
+     * @return string
+     */
+    private function getAudioOutputXpath()
+    {
+        return sprintf("%s/audiooutput", $this->getAudioOutputsXpath());
+    }
+
+    /**
+     * Get an individual audio output configuration XPath by UUID
+     *
+     * @return string
+     */
+    private function getAudioOutputXPathByUuid($uuid)
+    {
+        return sprintf(
+            "%s[uuid='%s']",
+            $this->getAudioOutputXPath(),
+            $uuid
+        );
+    }
+
+    /**
+     * Get the main event message path.
+     *
+     * @return string
+     */
+    private function getEventMessagePath()
+    {
+        return sprintf("org.openmediavault.services.%s", $this->getPluginName());
+    }
+
+    /**
+     * Get the audio output event message path.
+     *
+     * @return string
+     */
+    private function getAudioOutputEventMessagePath()
+    {
+        return sprintf("%s.audiooutputs.audiooutput", $this->getEventMessagePath());
+    }
+
+    /**
+     * Get the shared folder event message path.
+     *
+     * @return string
+     */
+     private function getSharedFolderEventMessagePath()
+     {
+         return "org.openmediavault.system.shares.sharedfolder";
+     }
+
+    /**
+     * Helper function to find out whether the given shared folder
+     * configuration object is used. If it is used, then mark the
+     * module as dirty.
+     * @param type The event message type.
+     * @param path The event message path.
+     * @param object The configuration object.
+     */
+    final public function onModifySharedFolder($type, $path, $object) {
+            global $xmlConfig;
+            $xpath = $this->getAudioOutputXPathByUuid($object["uuid"]);
+            if (TRUE === $xmlConfig->exists($xpath))
+                    $this->setDirty();
+    }
+
+    /**
+     * Get the status of the service.
+     *
+     * @return array
+     */
+    public function getStatus()
+    {
+        global $xmlConfig;
+
+        $object = $xmlConfig->get($this->getXpath());
+
+        if (is_null($object)) {
+            throw new OMVException(
+                OMVErrorMsg::E_CONFIG_GET_OBJECT_FAILED,
+                $this->getXpath()
+            );
+        }
+
+        $monit = new OMVMonit();
+        return array(
+            "name" => $this->getName(),
+            "title" => gettext("MPD"),
+            "enabled" => boolval($object["enable"]),
+            "running" => ($monit->status("netatalk") === "running")
+        );
+    }
+
+    /**
+     * Create and update the configuration.
+     *
+     * @return  void
+     */
+    public function applyConfig()
+    {
+        global $xmlConfig;
+
+        $cmd = sprintf("export LANG=C; omv-mkconf %s 2>&1", $this->getName());
+
+        if (0 !== $this->exec($cmd, $output)) {
+            throw new OMVException(
+                OMVErrorMsg::E_EXEC_FAILED,
+                $cmd,
+                implode("\n", $output)
+            );
+        }
+
+        $object = $xmlConfig->get($this->getXPath());
+
+        if (is_null($object)) {
+            throw new OMVException(
+                OMVErrorMsg::E_CONFIG_GET_OBJECT_FAILED,
+                $this->getXPath()
+            );
+        }
+
+        if (!boolval($object["enable"])) {
+            return;
+        }
+
+        $initd = new OMVSysVInitScript($this->getName());
+        $initd->invoke("force-reload");
+    }
+
+    /**
+     * Start the managed service.
+     *
+     * @return void
+     */
+    public function startService()
+    {
+        global $xmlConfig;
+
+        $object = $xmlConfig->get($this->getXpath());
+
+        if (is_null($object)) {
+            throw new OMVException(
+                OMVErrorMsg::E_CONFIG_GET_OBJECT_FAILED,
+                $this->getXpath()
+            );
+        }
+
+        if (!$object["enable"]) {
+            return;
+        }
+
+        // Start this service and register System-V style init script.
+        $initd = new OMVSysVInitScript($this->getName(), true);
+        $initd->exec();
+
+        // Enable monitoring of this service.
+    		$monit = new OMVMonit();
+    		$monit->monitor("mpd");
+    }
+
+    /**
+     * Stop the managed service.
+     *
+     * @return void
+     */
+    public function stopService()
+    {
+        // Disable monitoring of this service.
+        $monit = new OMVMonit();
+        $monit->unmonitor("mpd", TRUE);
+        // Stop this service and unregister System-V style init script.
+        $initd = new OMVSysVInitScript($this->getName());
+        $initd->exec();
+    }
+
+    /**
+     * Bind listeners.
+     *
+     * @return void
+     */
+    public function bindListeners(OMVNotifyDispatcher $dispatcher)
+    {
+        $dispatcher->addListener(
+            OMV_NOTIFY_MODIFY,
+            $this->getEventMessagePath(),
+            array($this, "setDirty")
+        );
+
+        $dispatcher->addListener(
+            OMV_NOTIFY_CREATE | OMV_NOTIFY_MODIFY | OMV_NOTIFY_DELETE,
+            $this->getAudioOutputEventMessagePath(),
+            array($this, "setDirty")
+        );
+
+        $dispatcher->addListener(
+            OMV_NOTIFY_MODIFY,
+            $this->getSharedFolderEventMessagePath(),
+            array($this, "onModifySharedFolder")
+        );
+
+        $moduleMgr = &OMVModuleMgr::getInstance();
+        $dispatcher->addListener(
+      		  OMV_NOTIFY_MODIFY,
+      		  $this->getEventMessagePath(),
+      		  array($moduleMgr->getModule("monit"), "setDirty")
+        );
+    }
+}
+
+// Register module
+$moduleMgr = &OMVModuleMgr::getInstance();
+$moduleMgr->registerModule(new OMVModuleMpd());
+
+// Register new logfile type.
+// Format:
+// Sep 01 13:43 : client: [62] command list size (2097163) is larger than the max (2097152)
+// Sep 01 17:17 : player_thread: played "http://192.168.1.1:9790/minimserver/*/Original-FLAC/CDs/Albums/_Compilations/100*25*20R...
+// Aug 30 12:45 : flac: FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC
+OMVLogFile::registerType("mpd", array(
+  "filename" => "mpd.log",
+  "filepath" => "/var/log/mpd/mpd.log",
+  "regex" => "/^(\S+\s+\d{2}\s+\d{2}:\d{2})\s:\s(\S+):\s+(.*)$/",
+  "columns" => array(
+	  "date" => array(
+		  "index" => 1,
+		  "func" => create_function('$v', 'return strpdate($v,"M d H:i");')
+	  ),
+	  "domain" => 2,
+	  "message" => 3
+  )));
+
+?>
