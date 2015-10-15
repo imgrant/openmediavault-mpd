@@ -175,7 +175,7 @@ class OMVModuleMpd extends OMVModuleServiceAbstract implements
             "name" => $this->getName(),
             "title" => gettext("MPD"),
             "enabled" => boolval($object["enable"]),
-            "running" => ($monit->status("netatalk") === "running")
+            "running" => ($monit->status($this->getPluginName()) === "running")
         );
     }
 

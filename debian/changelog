@@ -1,3 +1,9 @@
+openmediavault-mpd (1.0.1) stable; urgency=low
+
+  * Fix broken service status running check
+
+ -- OpenMediaVault Plugin Developers <plugins@omv-extras.org>  Thu, 15 Oct 2015 12:30:18 +0100
+
 openmediavault-mpd (1.0.0) stable; urgency=low
 
   * Initial release
