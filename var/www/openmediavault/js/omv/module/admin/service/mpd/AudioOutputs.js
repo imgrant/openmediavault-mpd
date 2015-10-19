@@ -494,7 +494,7 @@ Ext.define("OMV.module.admin.service.mpd.AudioOutputs", {
 OMV.WorkspaceManager.registerPanel({
 	id: "audiooutputs",
 	path: "/service/mpd",
-	text: _("Audio Outputs"),
+	text: _("Audio outputs"),
 	position: 20,
 	className: "OMV.module.admin.service.mpd.AudioOutputs"
 });
