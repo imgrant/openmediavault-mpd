@@ -40,16 +40,6 @@ class OMVModuleMpd extends OMVModuleServiceAbstract implements
     }
 
     /**
-     * Get the name of the plugin (lowercase).
-     *
-     * @return string
-     */
-    private function getPluginName()
-    {
-        return strtolower($this->getName());
-    }
-
-    /**
      * Defines the modules that if present should start before the service
      * provided by this module.
      * @return An array of modules.
@@ -70,7 +60,7 @@ class OMVModuleMpd extends OMVModuleServiceAbstract implements
      */
     private function getXPath()
     {
-        return sprintf("//services/%s", $this->getPluginName());
+        return sprintf("//services/%s", $this->getName());
     }
 
     /**
@@ -114,7 +104,7 @@ class OMVModuleMpd extends OMVModuleServiceAbstract implements
      */
     private function getEventMessagePath()
     {
-        return sprintf("org.openmediavault.services.%s", $this->getPluginName());
+        return sprintf("org.openmediavault.services.%s", $this->getName());
     }
 
     /**
@@ -175,7 +165,7 @@ class OMVModuleMpd extends OMVModuleServiceAbstract implements
             "name" => $this->getName(),
             "title" => gettext("MPD"),
             "enabled" => boolval($object["enable"]),
-            "running" => ($monit->status($this->getPluginName()) === "running")
+            "running" => ($monit->status($this->getName()) === "running")
         );
     }
 
